@@ -7,6 +7,8 @@ python-multipart>=0.0.9
 easyocr>=1.7.1
 torch>=2.0.0
 torchvision>=0.15.0
+google-generativeai>=0.3.0
+
 
 # Image & Document Processing
 opencv-python>=4.8.0

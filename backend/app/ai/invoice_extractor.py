@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
-import json
 import logging
 from typing import Any, Dict, Optional
+from pydantic import ValidationError
 
 from app.ocr.schemas import OCRResult
 from app.schemas.invoice_schema import Invoice
+from app.ai.prompts import PromptBuilder
+from app.ai.json_parser import JSONParser
+from app.exceptions import ValidationException
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +34,8 @@ class LLMProvider(ABC):
 
 class InvoiceExtractor:
     """
-    Service to extract structured canonical invoice data from OCRResult using LLMs.
+    Service coordinating the extraction of structured pharmacy invoice data from OCRResult.
+    Delegates prompt engineering, JSON repairing, and schema validation to specialized utilities.
     """
 
     def __init__(self, provider: LLMProvider):
@@ -45,90 +49,74 @@ class InvoiceExtractor:
 
     def build_prompt(self, ocr_text: str) -> str:
         """
-        Constructs the extraction prompt instructing the LLM to extract fields from the OCR text.
-        
+        Delegates prompt creation to the PromptBuilder utility.
+
         Args:
             ocr_text (str): The raw text extracted from the invoice file.
 
         Returns:
             str: Structured prompt text.
         """
-        prompt = (
-            "You are an expert OCR Invoice processing assistant specialized in Indian Pharmacy purchase invoices.\n"
-            "Analyze the raw OCR text provided below and extract the information into the exact JSON schema requested.\n\n"
-            
-            "RULES FOR EXTRACTION:\n"
-            "1. For each value field, extract a ValuePair containing:\n"
-            "   - 'raw': The exact text fragment found on the invoice (do not change spelling/symbols).\n"
-            "   - 'normalized': The cleaned version of the data. E.g.:\n"
-            "       - Dates: ISO format 'YYYY-MM-DD'\n"
-            "       - Numbers: float or integer (remove commas, currency symbols)\n"
-            "       - Text: trimmed and standardized strings\n"
-            "   - 'confidence': Estimate a confidence score from 0.0 to 1.0 based on clarity.\n"
-            "2. Extract pharmacy specific columns: HSN Code, Batch Number, Expiry Date, Quantity, Free Quantity, MRP, Purchase Rate, and GST/Tax breakdown (CGST, SGST, IGST).\n"
-            "3. Ensure mathematical consistency: taxable_amount should equal (qty * purchase_rate) minus any discount, and total gst_amount should align with cgst + sgst + igst.\n\n"
-            
-            "RAW OCR TEXT:\n"
-            f"\"\"\"\n{ocr_text}\n\"\"\"\n\n"
-            
-            "OUTPUT FORMAT:\n"
-            "Provide ONLY a valid JSON object matching the requested schema. No explanations, no markdown wrappers (like ```json)."
-        )
-        return prompt
+        return PromptBuilder.get_pharmacy_extraction_prompt(ocr_text)
 
     def parse_response(self, raw_response: str) -> Invoice:
         """
-        Parses the raw JSON string from the LLM and validates it against the Invoice schema.
-        Raises ValueError or Pydantic ValidationError if parsing or schema validation fails.
+        Parses raw text using JSONParser and validates it against the Invoice schema.
 
         Args:
             raw_response (str): The raw text/JSON returned by the LLM.
 
         Returns:
             Invoice: The validated canonical Invoice model.
-        
-        Raises:
-            ValueError: If the raw response is not valid JSON.
-            ValidationError: If the parsed dictionary fails validation against the Invoice schema.
-        """
-        # Clean markdown wrappers if returned by the LLM
-        clean_json = raw_response.strip()
-        if clean_json.startswith("```json"):
-            clean_json = clean_json[7:]
-        if clean_json.endswith("```"):
-            clean_json = clean_json[:-3]
-        clean_json = clean_json.strip()
 
+        Raises:
+            ValidationException: If parsing fails or the schema validation check fails.
+        """
         try:
-            parsed_dict = json.loads(clean_json)
-        except json.JSONDecodeError as je:
-            logger.error(f"Failed to decode LLM response JSON: {raw_response}")
-            raise ValueError(f"LLM response was not valid JSON: {je}") from je
+            # Parse and repair raw text using the JSONParser utility
+            parsed_dict = JSONParser.parse(raw_response)
             
-        # Instantiate Pydantic model for validation.
-        # This will automatically raise pydantic.ValidationError if schema fails.
-        invoice_model = Invoice.model_validate(parsed_dict)
-        return invoice_model
+            # Validate against canonical Invoice schema
+            return Invoice.model_validate(parsed_dict)
+            
+        except ValidationError as ve:
+            logger.error(f"Invoice schema validation failed: {ve}")
+            raise ValidationException(
+                message="Extracted data did not conform to the canonical Invoice schema structure.",
+                details=str(ve)
+            ) from ve
+        except Exception as e:
+            logger.error(f"JSON parsing or extraction cleaning failed: {e}")
+            raise ValidationException(
+                message=f"Failed to process and validate LLM extraction response: {e}"
+            ) from e
 
     def extract(self, ocr_result: OCRResult) -> Invoice:
         """
-        Execute the full extraction pipeline: extract full_text -> build prompt -> call LLM -> parse & validate.
+        Execute the full extraction pipeline: build prompt -> call LLM -> parse, repair & validate.
 
         Args:
-            ocr_result (OCRResult): Structured OCR results containing the text.
+            ocr_result (OCRResult): Structured OCR results.
 
         Returns:
             Invoice: The parsed and validated canonical Invoice.
+        
+        Raises:
+            ValidationException: If schema validation fails.
+            LLMProviderException: If generative AI provider fails.
         """
-        # Extract full_text from OCRResult
-        ocr_text = ocr_result.full_text
-        
-        # Build prompt
-        prompt = self.build_prompt(ocr_text)
-        
-        # Query provider
-        schema_dict = Invoice.model_json_schema()
-        raw_output = self.provider.generate(prompt, response_schema=schema_dict)
-        
-        # Parse and validate response
-        return self.parse_response(raw_output)
+        logger.info("Executing structured AI invoice extraction pipeline.")
+        try:
+            # 1. Build extraction prompt from OCRResult text using PromptBuilder
+            prompt = self.build_prompt(ocr_result.full_text)
+            
+            # 2. Query LLM provider with target JSON schema constraints
+            schema_dict = Invoice.model_json_schema()
+            raw_output = self.provider.generate(prompt, response_schema=schema_dict)
+            
+            # 3. Parse, repair, and validate response
+            return self.parse_response(raw_output)
+            
+        except Exception as e:
+            logger.error(f"Extraction pipeline execution failed: {e}")
+            raise
