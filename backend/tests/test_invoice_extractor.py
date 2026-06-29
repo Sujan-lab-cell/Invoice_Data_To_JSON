@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 
@@ -6,72 +5,87 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from app.services.parser_service import ParserService
-from app.ai.gemini_client import GeminiClient
-from app.ai.invoice_extractor import InvoiceExtractor
-from app.ai.json_parser import JSONParser
+from app.ai.rule_based_extractor import RuleBasedInvoiceExtractor
 from app.schemas.invoice_schema import Invoice
 
 
+from app.ocr.schemas import OCRResult
+
+
+# Configurable constants
+TEST_DATA_DIR = Path(__file__).parent / "sample_invoices"
+SAMPLE_FILE_NAME = "MCRB PHARMA PILATHARA Sales Invoice 8898.pdf"
+
+
 def main():
-    # 0. Check for API configuration
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        print("\n❌ Error: GEMINI_API_KEY or GOOGLE_API_KEY is not set.")
-        print("Please configure your API key in your terminal before running:")
-        print("PowerShell: $env:GEMINI_API_KEY=\"your_key_here\"\n")
+    sample_file = TEST_DATA_DIR / SAMPLE_FILE_NAME
+    if not sample_file.exists():
+        print(f"\n[ERROR] Sample invoice file not found at: {sample_file}\n")
         return
 
-    sample_pdf = Path(__file__).parent / "4220 (1).pdf"
-    if not sample_pdf.exists():
-        print(f"\n❌ Error: Sample PDF invoice not found at: {sample_pdf}\n")
-        return
-
-    # 1. Load OCR Text from the sample PDF file
-    print("\n--- 1. Parsing Sample PDF Invoice ---")
+    # 1. Load Text from the sample file
+    print(f"\n--- 1. Parsing Sample Invoice: {sample_file.name} ---")
     parser_service = ParserService()
-    parse_result = parser_service.parse(str(sample_pdf))
-    ocr_result = parse_result["raw_data"]
-    print(f"Successfully extracted OCR text from PDF (length: {len(ocr_result.full_text)} characters).")
+    parse_result = parser_service.parse(str(sample_file))
+    
+    if parse_result["source_file_type"] in ["csv", "excel"]:
+        ocr_result = OCRResult(full_text=parse_result["text"])
+    else:
+        ocr_result = parse_result["raw_data"]
+        
+    print(f"Successfully extracted text (length: {len(ocr_result.full_text)} characters).")
 
-    # 2. Instantiate GeminiClient & InvoiceExtractor
-    print("\n--- 2. Initializing Gemini Client & Extractor ---")
-    provider = GeminiClient()
-    extractor = InvoiceExtractor(provider=provider)
+    # 2. Instantiate RuleBasedInvoiceExtractor
+    print("\n--- 2. Initializing Rule-Based Extractor ---")
+    extractor = RuleBasedInvoiceExtractor()
 
-    # 3. Build the extraction prompt
-    print("\n--- 3. Building Extraction Prompt ---")
-    prompt = extractor.build_prompt(ocr_result.full_text)
-    print("Extraction prompt constructed successfully.")
+    # 3. Perform Extraction
+    print("\n--- 3. Extracting structured invoice JSON matching schema ---")
+    invoice = extractor.extract(ocr_result)
+    print("Extraction completed successfully.")
 
-    # 4. Call GeminiClient and retrieve response
-    print("\n--- 4. Sending Request to Gemini Client ---")
-    raw_response = provider.generate(prompt, response_schema=Invoice.model_json_schema())
-    print("Received raw response text from Gemini.")
-
-    # 5. Parse JSON using JSONParser
-    print("\n--- 5. Parsing & Cleaning Response with JSONParser ---")
-    parsed_json = JSONParser.parse(raw_response)
-    print("JSON parsed, cleaned, and repaired successfully.")
-
-    # 6. Validate against Invoice Schema
-    print("\n--- 6. Validating JSON against Canonical Invoice Schema ---")
-    invoice = Invoice.model_validate(parsed_json)
-    print("Schema validation successful! Matches canonical structure.")
-
-    # 7. Print extracted details
+    # 4. Print extracted details to verify they conform to the schema
     print("\n" + "=" * 80)
-    print("🎉 EXTRACTED INVOICE SUMMARY 🎉")
-    print(f"Invoice Number (Raw):        {invoice.invoice_number.raw}")
-    print(f"Invoice Number (Normalized): {invoice.invoice_number.normalized}")
-    print(f"Invoice Date (Raw):          {invoice.invoice_date.raw}")
-    print(f"Invoice Date (Normalized):   {invoice.invoice_date.normalized}")
-    print(f"Supplier Name (Raw):         {invoice.supplier.name.raw}")
-    print(f"Supplier Name (Normalized):   {invoice.supplier.name.normalized}")
-    print(f"Supplier GSTIN (Raw):        {invoice.supplier.gstin.raw if invoice.supplier.gstin else 'N/A'}")
-    print(f"Grand Total (Raw):           {invoice.totals.grand_total.raw}")
-    print(f"Grand Total (Normalized):    {invoice.totals.grand_total.normalized}")
-    print(f"Line Items Extracted:        {len(invoice.items)}")
+    print("=== EXTRACTED INVOICE SUMMARY (IMPROVED RULE-BASED EXTRACTOR) ===")
+    print(f"Invoice Number (Raw):        {invoice.invoice_number.raw!r}")
+    print(f"Invoice Date (Raw):          {invoice.invoice_date.raw!r}")
+    print(f"Invoice Date (Normalized):   {invoice.invoice_date.normalized!r}")
+    print(f"Due Date (Raw):              {(invoice.due_date.raw if invoice.due_date else None)!r}")
+    print(f"Due Date (Normalized):       {(invoice.due_date.normalized if invoice.due_date else None)!r}")
+    print(f"Order Number (Raw):          {(invoice.order_number.raw if invoice.order_number else None)!r}")
+    print(f"Payment Type (Raw):          {(invoice.payment_type.raw if invoice.payment_type else None)!r}")
+    
+    print("-" * 40)
+    print(f"Supplier Name (Raw):         {invoice.supplier.name.raw!r}")
+    print(f"Supplier GSTIN (Raw):        {(invoice.supplier.gstin.raw if invoice.supplier.gstin else None)!r}")
+    print(f"Supplier State (Raw):        {(invoice.supplier.state.raw if invoice.supplier.state else None)!r}")
+    print(f"Supplier State (Normalized): {(invoice.supplier.state.normalized if invoice.supplier.state else None)!r}")
+    
+    print("-" * 40)
+    print(f"Buyer Name (Raw):            {invoice.buyer.name.raw!r}")
+    print(f"Buyer GSTIN (Raw):           {(invoice.buyer.gstin.raw if invoice.buyer.gstin else None)!r}")
+    print(f"Buyer State (Raw):           {(invoice.buyer.state.raw if invoice.buyer.state else None)!r}")
+    print(f"Buyer State (Normalized):    {(invoice.buyer.state.normalized if invoice.buyer.state else None)!r}")
     print("=" * 80 + "\n")
+
+    # 5. Convert Invoice model to JSON and optionally save/print
+    import json
+    json_data = invoice.model_dump(mode="json")
+    
+    print("=" * 80)
+    print("=== FINAL COMPLETE JSON OUTPUT (RULE-BASED EXTRACTOR) ===")
+    print("=" * 80)
+    print(json.dumps(json_data, indent=2))
+    print("=" * 80 + "\n")
+    
+    # Save the output JSON
+    output_dir = Path(__file__).parent.parent / "outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = output_dir / "invoice.json"
+    
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(json_data, f, indent=2)
+    print(f"Successfully saved final JSON output to: {output_file}\n")
 
 
 if __name__ == "__main__":

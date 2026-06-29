@@ -1,6 +1,10 @@
-from app.services.parser_service import (
-    ParserService
-)
+import sys
+from pathlib import Path
+
+# Add backend folder to sys.path to enable direct app module imports
+sys.path.append(str(Path(__file__).parent.parent))
+
+from app.services.parser_service import ParserService
 
 
 def main():
@@ -8,7 +12,8 @@ def main():
     parser = ParserService()
 
     result = parser.parse(
-        r"E:\Ayush_lab\Invoice_Data_To_JSON-1\backend\tests\4220 (1).pdf"
+        # r"E:\Ayush_lab\Invoice_Data_To_JSON-1\backend\tests\DEEPA DRUG HOUSE THALASSERY Sales Invoice 3965 (1).xls"
+        r"E:\Ayush_lab\Invoice_Data_To_JSON-1\backend\tests\SUNANDA ASSOCIATES KOZHIKODE Sales Invoice 28053 (1).xls"
     )
 
     print("\n")

@@ -35,16 +35,38 @@ class ParserService:
     ):
         """
         Initialize the ParserService with dependency injection.
-        If no dependencies are provided, defaults will be instantiated.
+        If no dependencies are provided, defaults will be instantiated lazily.
         """
-        # Set up OCR engine
-        self.ocr_engine = ocr_engine or EasyOCREngine()
-
-        # Set up individual parsers, injecting OCR engine if required
-        self.image_parser = image_parser or ImageParser(ocr_engine=self.ocr_engine)
-        self.pdf_parser = pdf_parser or PDFParser(ocr_engine=self.ocr_engine)
+        self._ocr_engine = ocr_engine
+        self._image_parser = image_parser
+        self._pdf_parser = pdf_parser
         self.excel_parser = excel_parser or ExcelParser()
         self.csv_parser = csv_parser or CSVParser()
+        self.ocr_initialized = False
+        self.ocr_init_duration = 0.0
+
+    @property
+    def ocr_engine(self) -> OCREngine:
+        if self._ocr_engine is None:
+            import time
+            logger.info("Initializing EasyOCREngine (Lazy Load)...")
+            t0 = time.perf_counter()
+            self._ocr_engine = EasyOCREngine()
+            self.ocr_init_duration = time.perf_counter() - t0
+            self.ocr_initialized = True
+        return self._ocr_engine
+
+    @property
+    def image_parser(self) -> ImageParser:
+        if self._image_parser is None:
+            self._image_parser = ImageParser(ocr_engine=self.ocr_engine)
+        return self._image_parser
+
+    @property
+    def pdf_parser(self) -> PDFParser:
+        if self._pdf_parser is None:
+            self._pdf_parser = PDFParser(ocr_engine=self.ocr_engine)
+        return self._pdf_parser
 
     def parse(self, file_path: str) -> Dict[str, Any]:
         """

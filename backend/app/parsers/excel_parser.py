@@ -23,7 +23,7 @@ class ExcelParser:
             )
 
             sheet_text.append(
-                df.to_string(index=False)
+                df.to_csv(index=False, sep="|")
             )
 
         return {

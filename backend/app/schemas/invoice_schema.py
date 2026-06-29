@@ -32,6 +32,7 @@ class Supplier(BaseModel):
     gstin: Optional[ValuePair] = Field(None, description="Supplier GST Identification Number.")
     address: Optional[ValuePair] = Field(None, description="Supplier physical address.")
     phone: Optional[ValuePair] = Field(None, description="Supplier contact number.")
+    state: Optional[ValuePair] = Field(None, description="Supplier state.")
 
 
 class Buyer(BaseModel):
@@ -41,6 +42,7 @@ class Buyer(BaseModel):
     name: ValuePair = Field(..., description="Buyer pharmacy name.")
     gstin: Optional[ValuePair] = Field(None, description="Buyer GST Identification Number.")
     address: Optional[ValuePair] = Field(None, description="Buyer delivery address.")
+    state: Optional[ValuePair] = Field(None, description="Buyer state.")
 
 
 class Product(BaseModel):
@@ -217,6 +219,9 @@ class Invoice(BaseModel):
     """
     invoice_number: ValuePair = Field(..., description="Unique invoice ID reference.")
     invoice_date: ValuePair = Field(..., description="Date of invoice issue.")
+    due_date: Optional[ValuePair] = Field(None, description="Due date of invoice payment.")
+    order_number: Optional[ValuePair] = Field(None, description="Order or PO number.")
+    payment_type: Optional[ValuePair] = Field(None, description="Payment type (e.g. CREDIT, CASH).")
     supplier: Supplier = Field(..., description="Supplier details.")
     buyer: Buyer = Field(..., description="Buyer/Hospital details.")
     items: List[InvoiceItem] = Field(..., description="Table of product line items.")

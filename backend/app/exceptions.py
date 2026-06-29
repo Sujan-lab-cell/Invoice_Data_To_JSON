@@ -29,13 +29,6 @@ class UnsupportedFileTypeError(ParserException):
     pass
 
 
-class JSONParseError(AppException, ValueError):
-    """
-    Raised when the JSON parser utility fails to clean, repair, or deserialize LLM responses.
-    """
-    pass
-
-
 class ValidationException(AppException):
     """
     Raised when extracted values violate critical business rules or mathematical checks.
@@ -49,16 +42,3 @@ class InventoryMappingException(AppException):
     """
     pass
 
-
-class LLMProviderException(AppException):
-    """
-    Raised when generative AI API providers fail (e.g. timeouts, rate-limits, validation issues).
-    """
-    pass
-
-
-class GeminiExtractionError(LLMProviderException):
-    """
-    Raised specifically when Google Gemini fails to yield parsable outputs after retries.
-    """
-    pass

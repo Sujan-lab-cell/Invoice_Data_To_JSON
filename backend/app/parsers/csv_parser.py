@@ -39,16 +39,8 @@ class CSVParser:
             # 1. Convert rows to structured dictionary records
             rows_data = df.to_dict(orient="records")
 
-            # 2. Reconstruct original row text for downstream AI text extraction
-            row_texts = []
-            for _, row in df.iterrows():
-                row_str = " | ".join(
-                    [f"{col}: {val}" for col, val in row.items() if str(val).strip() != ""]
-                )
-                if row_str.strip():
-                    row_texts.append(row_str)
-
-            combined_text = "\n".join(row_texts)
+            # 2. Reconstruct original row text as pipe-delimited CSV
+            combined_text = df.to_csv(index=False, sep="|")
 
             return {
                 "text": combined_text,

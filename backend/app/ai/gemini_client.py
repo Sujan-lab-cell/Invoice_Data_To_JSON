@@ -1,128 +1,66 @@
 import json
 import logging
-import os
-from typing import Any, Dict, Optional
 import google.generativeai as genai
-
-from app.ai.invoice_extractor import LLMProvider
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Initialize the Gemini API client once.
+# This configures google-generativeai globally.
+if settings.GEMINI_API_KEY:
+    genai.configure(api_key=settings.GEMINI_API_KEY)
+else:
+    logger.warning("GEMINI_API_KEY is not set in configuration settings.")
 
-class GeminiExtractionError(Exception):
-    """
-    Custom exception raised when extraction using the Gemini API fails repeatedly.
-    """
+
+class GeminiAPIError(Exception):
+    """Exception raised when a Gemini API call or response parsing fails."""
     pass
 
 
-class GeminiClient(LLMProvider):
+def generate_json(prompt: str, model_name: str = "gemini-2.5-flash") -> dict:
     """
-    Gemini implementation of the LLMProvider interface.
-    Isolates Gemini configuration, client calls, and safety parsing logic.
+    Sends a prompt to the Gemini API and parses the response to return a JSON dictionary.
+
+    Args:
+        prompt (str): The prompt text to send to Gemini.
+        model_name (str): The name of the Gemini model to use (default: gemini-1.5-flash).
+
+    Returns:
+        dict: The parsed JSON dictionary.
+
+    Raises:
+        ValueError: If the GEMINI_API_KEY is not configured.
+        GeminiAPIError: If the API call fails or if the output is not valid JSON.
     """
+    if not settings.GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY is not configured in settings.")
 
-    def __init__(self, model_name: str = "gemini-1.5-flash"):
-        """
-        Configure the Gemini SDK and initialize the model using environment credentials.
-        """
-        # Load API key from env (checking common aliases)
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "Gemini API Key not found. Please set GEMINI_API_KEY or GOOGLE_API_KEY in your environment."
-            )
+    try:
+        model = genai.GenerativeModel(model_name)
+        # Using response_mime_type="application/json" to prompt Gemini to output valid JSON.
+        response = model.generate_content(
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
+        )
+    except Exception as e:
+        logger.error(f"Gemini API invocation failed: {e}", exc_info=True)
+        raise GeminiAPIError(f"Gemini API invocation failed: {e}") from e
 
-        genai.configure(api_key=api_key)
-        self.model_name = model_name
-        self.model = genai.GenerativeModel(model_name)
-        logger.info(f"GeminiClient initialized successfully with model: {model_name}")
+    if not response or not response.text:
+        raise GeminiAPIError("Gemini API returned an empty or invalid response.")
 
-    def generate(self, prompt: str, response_schema: Optional[Dict[str, Any]] = None) -> str:
-        """
-        Generates content from the Gemini model matching the LLMProvider interface.
+    text = response.text.strip()
 
-        Args:
-            prompt (str): Prompt text.
-            response_schema (Optional[Dict[str, Any]]): JSON Schema dictionary.
+    # In case the response is wrapped in markdown formatting blocks, clean it.
+    if text.startswith("```json"):
+        text = text[7:]
+    if text.endswith("```"):
+        text = text[:-3]
+    text = text.strip()
 
-        Returns:
-            str: Raw JSON string output.
-        """
-        generation_config = {}
-        if response_schema:
-            # Force JSON-only outputs using configuration
-            generation_config["response_mime_type"] = "application/json"
-            # Some versions of google-generativeai support direct schema enforcement via:
-            # generation_config["response_schema"] = response_schema
-            
-        try:
-            config = genai.GenerationConfig(**generation_config)
-            response = self.model.generate_content(
-                prompt,
-                generation_config=config
-            )
-            return response.text
-        except Exception as e:
-            logger.error(f"Gemini generate API call failed: {e}")
-            raise RuntimeError(f"Gemini API failure: {e}") from e
-
-    def extract(self, text: str, prompt: str) -> dict:
-        """
-        Extracts structured data from raw OCR text using a prompt.
-        Attempts extraction with a retry hook if JSON parsing fails.
-
-        Args:
-            text (str): Raw OCR/document text.
-            prompt (str): Extraction prompt guidelines.
-
-        Returns:
-            dict: Structured parsed dictionary of extracted data.
-
-        Raises:
-            GeminiExtractionError: If extraction fails twice consecutively due to API or JSON errors.
-        """
-        combined_prompt = f"{prompt}\n\n[INPUT DATA]:\n{text}"
-        
-        # Implement a retry-once policy (2 attempts max)
-        max_attempts = 2
-        for attempt in range(max_attempts):
-            try:
-                logger.info(f"Gemini extraction attempt {attempt + 1}/{max_attempts}")
-                
-                # Configure generation to force JSON-only responses
-                config = genai.GenerationConfig(
-                    response_mime_type="application/json"
-                )
-                
-                response = self.model.generate_content(
-                    combined_prompt,
-                    generation_config=config
-                )
-                
-                raw_response = response.text.strip()
-                
-                # Parse JSON safely (removing potential markdown brackets)
-                clean_json = self._clean_json_formatting(raw_response)
-                parsed_dict = json.loads(clean_json)
-                
-                return parsed_dict
-
-            except (json.JSONDecodeError, Exception) as e:
-                logger.warning(f"Gemini extraction attempt {attempt + 1} failed: {e}")
-                if attempt == max_attempts - 1:
-                    # Raise custom exception on repeated failure
-                    raise GeminiExtractionError(
-                        f"Gemini extraction failed after {max_attempts} attempts. Final error: {e}"
-                    ) from e
-
-    def _clean_json_formatting(self, raw_text: str) -> str:
-        """
-        Cleans any markdown notation wrappers (like ```json ... ```) from the LLM text.
-        """
-        clean_text = raw_text.strip()
-        if clean_text.startswith("```json"):
-            clean_text = clean_text[7:]
-        if clean_text.endswith("```"):
-            clean_text = clean_text[:-3]
-        return clean_text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse Gemini response as JSON. Response text: {response.text}", exc_info=True)
+        raise GeminiAPIError(f"Gemini API returned invalid JSON: {e}") from e
