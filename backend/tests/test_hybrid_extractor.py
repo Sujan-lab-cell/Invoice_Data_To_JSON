@@ -12,7 +12,7 @@ from app.ocr.schemas import OCRResult
 
 # Configurable constants
 TEST_DATA_DIR = Path(__file__).parent / "sample_invoices"
-SAMPLE_FILE_NAME = "MCRB PHARMA PILATHARA Sales Invoice 8898.pdf"
+SAMPLE_FILE_NAME = "VINAYAKA ENTERPRISES PAYYANUR, KANNUR DISTT Sales Invoice 1758 (1).pdf"
 
 
 def main():
