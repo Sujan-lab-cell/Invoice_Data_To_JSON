@@ -1,0 +1,29 @@
+# ==============================================================================
+# Render Blueprint Specification for Invoice Data To JSON API
+# ==============================================================================
+# Documentation: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: invoice-parser-api
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: API_BEARER_TOKEN
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: MAX_UPLOAD_SIZE_MB
+        value: 25
+      - key: LOG_LEVEL
+        value: INFO
+      - key: OCR_GPU
+        value: false
+      - key: CORS_ORIGINS
+        value: "https://app.ayuslab.com,http://localhost:3000,http://localhost:5173"

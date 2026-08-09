@@ -1,0 +1,28 @@
+# Git & IDE files
+.git
+.gitignore
+.gemini
+.idea
+.vscode
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Local environment & virtualenvs
+env/
+venv/
+.env
+.env.local
+
+# Frontend (not needed in backend API container)
+frontend/
+
+# Test caches & artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+backend/tests/sample_invoices/
+backend/tests/
+brain/
+scratch/
