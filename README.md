@@ -278,12 +278,41 @@ backend/
 - Regular Expressions (Regex)
 
 ---
+# AyusLab API Integration
 
+The Invoice Parser is deployed as an independent FastAPI service so that the AyusLab application can send invoice files to the backend and receive the extracted invoice data as structured JSON.
+
+## Integration Flow
+
+```text
+AyusLab Application
+        |
+        | Upload Invoice
+        v
+AyusLab Backend
+        |
+        | POST invoice file
+        | Authorization: Bearer <TOKEN>
+        v
+Invoice Parser API
+        |
+        | OCR + Rule Extraction
+        | Gemini Fallback
+        | Validation
+        v
+Structured JSON Response
+        |
+        v
+AyusLab Backend
+        |
+        | Inventory Matching
+        | Purchase Entry
+        v
+AyusLab Purchase Module
+```
 # Features that are left
 
 - Inventory Master Integration
 - Product Mapping (Exact & Fuzzy)
 - Purchase Entry API Integration
-- FastAPI REST Endpoints
-- Frontend Review Dashboard
 - Automated Inventory Updates
