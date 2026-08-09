@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import List
+from typing import List, Optional, Any
 import pdfplumber
 from pdf2image import convert_from_path
 
@@ -18,14 +18,22 @@ class PDFParser:
     Detects if a PDF contains digital text or is scanned, and extracts content accordingly.
     """
 
-    def __init__(self, ocr_engine: OCREngine):
+    def __init__(
+        self,
+        ocr_engine: Optional[OCREngine] = None,
+        ocr_engine_getter: Optional[Any] = None
+    ):
         """
-        Dependency inject the OCR engine.
+        Dependency inject the OCR engine or a lazy getter.
+        """
+        self._ocr_engine = ocr_engine
+        self._ocr_engine_getter = ocr_engine_getter
 
-        Args:
-            ocr_engine (OCREngine): OCR engine implementing the OCREngine interface.
-        """
-        self.ocr_engine = ocr_engine
+    @property
+    def ocr_engine(self) -> OCREngine:
+        if self._ocr_engine is None and self._ocr_engine_getter is not None:
+            self._ocr_engine = self._ocr_engine_getter()
+        return self._ocr_engine
 
     def parse(self, file_path: str) -> OCRResult:
         """

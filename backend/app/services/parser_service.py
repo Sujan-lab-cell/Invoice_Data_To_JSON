@@ -65,7 +65,7 @@ class ParserService:
     @property
     def pdf_parser(self) -> PDFParser:
         if self._pdf_parser is None:
-            self._pdf_parser = PDFParser(ocr_engine=self.ocr_engine)
+            self._pdf_parser = PDFParser(ocr_engine_getter=lambda: self.ocr_engine)
         return self._pdf_parser
 
     def parse(self, file_path: str) -> Dict[str, Any]:

@@ -2,6 +2,13 @@ import logging
 from statistics import mean
 from typing import List
 import easyocr
+import torch
+
+try:
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+except Exception:
+    pass
 
 from app.core.config import settings
 from app.ocr.base import OCREngine
