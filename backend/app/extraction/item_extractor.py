@@ -51,6 +51,25 @@ class ItemExtractor:
         re.IGNORECASE | re.VERBOSE
     )
 
+    LINE_PATTERN_SNO_MFG_DESC_PACK_HSN = re.compile(
+        r"^(?P<line_no>\d+)\s+"
+        r"(?P<mfg>[A-Z0-9]+)\s+"
+        r"(?P<desc>[A-Z\d\s\.\&\-\/\+\`\'’\(\)]+?)\s+"
+        r"(?P<pack>\d+(?:X\d+)?(?:`|'|’)?(?:[sS]|TABS|CAPS|NOS|PCS|ML|GM|VIAL|AMPS)?)\s+"
+        r"(?P<hsn>\d{4,8})\s+"
+        r"(?P<batch>[A-Z0-9\-]+)\s+"
+        r"(?P<exp>\d{2}[/\-]\d{2,4})\s+"
+        r"(?P<qty>\d+(?:\.\d+)?)\s+"
+        r"(?P<free_qty>\d+(?:\.\d+)?)\s+"
+        r"(?P<mrp>\d+\.\d{2})\s+"
+        r"(?P<rate>\d+\.\d{2,3})\s+"
+        r"(?P<dis_pct>\d+\.\d{2})\s+"
+        r"(?P<gst_pct>\d+(?:\.\d+)?)\s+"
+        r"(?P<taxable_amt>\d+\.\d{2})"
+        r"(?P<suffix>.*)$",
+        re.IGNORECASE | re.VERBOSE
+    )
+
     @classmethod
     def _extract_from_structured_sheet(cls, ocr_text: str) -> Optional[List[Dict[str, Any]]]:
         """Extracts items from CSV/Excel structured text representation."""
@@ -338,6 +357,158 @@ class ItemExtractor:
                 except Exception as e:
                     logger.debug(f"Failed parsing item row with LINE_PATTERN_MFG_HSN: {e}")
                     continue
+
+            # Check layout pattern 3: [LineNo] [Mfg] [Desc] [Pack] [HSN] [Batch] [Exp] [Qty] [Free] [MRP] [Rate] [Dis%] [GST%] [Amount]
+            match_v3 = cls.LINE_PATTERN_SNO_MFG_DESC_PACK_HSN.match(line_clean)
+            if match_v3:
+                gd = match_v3.groupdict()
+                try:
+                    mfg = gd["mfg"].strip()
+                    raw_desc = gd["desc"].strip()
+                    product_desc = f"{mfg} {raw_desc}".strip() if mfg else raw_desc
+
+                    billed_qty = float(gd["qty"])
+                    free_qty = float(gd["free_qty"])
+                    mrp_val = float(gd["mrp"])
+                    rate_val = float(gd["rate"])
+                    dis_val = float(gd["dis_pct"])
+                    gst_val = float(gd["gst_pct"])
+                    taxable_val = float(gd["taxable_amt"])
+
+                    discount_amount_val = round(taxable_val * (dis_val / 100.0), 2)
+                    gst_amount_val = round(taxable_val * (gst_val / 100.0), 2)
+
+                    unit_count = 1
+                    pack_str = gd["pack"]
+                    pack_x = re.search(r"(\d+)X(\d+)", pack_str, re.IGNORECASE)
+                    if pack_x:
+                        unit_count = int(pack_x.group(1)) * int(pack_x.group(2))
+                    else:
+                        pack_match = re.match(r"^(\d+)", pack_str)
+                        if pack_match:
+                            unit_count = int(pack_match.group(1))
+
+                    unit_type = "Units"
+                    desc_lower = product_desc.lower()
+                    if "tab" in desc_lower or "tab" in pack_str.lower() or "'s" in pack_str.lower() or "s" in pack_str.lower():
+                        unit_type = "Tablets"
+                    elif "cap" in desc_lower or "cap" in pack_str.lower():
+                        unit_type = "Capsules"
+                    elif "syr" in desc_lower or "liq" in desc_lower or "ml" in desc_lower:
+                        unit_type = "Bottles"
+                    elif "vial" in desc_lower or "vial" in pack_str.lower():
+                        unit_type = "Vials"
+                    elif "amp" in desc_lower or "amp" in pack_str.lower():
+                        unit_type = "Ampoules"
+
+                    free_qty_field = {"raw": str(free_qty), "normalized": free_qty, "confidence": 0.9} if free_qty > 0 else None
+
+                    item = {
+                        "line_number": int(gd["line_no"]) if gd.get("line_no") and gd["line_no"].isdigit() else line_num,
+                        "product": {
+                            "product_code": {"raw": mfg, "normalized": mfg, "confidence": 0.9} if mfg else None,
+                            "description": {"raw": product_desc, "normalized": product_desc, "confidence": 0.9},
+                            "hsn_code": {"raw": gd["hsn"], "normalized": gd["hsn"], "confidence": 0.9}
+                        },
+                        "batch": {
+                            "batch_no": {"raw": gd["batch"], "normalized": gd["batch"], "confidence": 0.9},
+                            "expiry_date": {"raw": gd["exp"], "normalized": gd["exp"], "confidence": 0.9}
+                        },
+                        "packaging": {
+                            "pack_size": pack_str,
+                            "unit_count": unit_count,
+                            "unit_type": unit_type
+                        },
+                        "quantity": {
+                            "qty": {"raw": str(billed_qty), "normalized": billed_qty, "confidence": 0.9},
+                            "free_qty": free_qty_field,
+                            "total_qty": (billed_qty + free_qty) * unit_count
+                        },
+                        "pricing": {
+                            "mrp": {"raw": gd["mrp"], "normalized": mrp_val, "confidence": 0.9},
+                            "purchase_rate": {"raw": gd["rate"], "normalized": rate_val, "confidence": 0.9},
+                            "discount_percentage": {"raw": gd["dis_pct"], "normalized": dis_val, "confidence": 0.9} if dis_val > 0 else None,
+                            "discount_amount": {"raw": str(discount_amount_val), "normalized": discount_amount_val, "confidence": 0.9} if discount_amount_val > 0 else None,
+                            "taxable_amount": {"raw": gd["taxable_amt"], "normalized": taxable_val, "confidence": 0.9}
+                        },
+                        "tax": {
+                            "cgst_percentage": None,
+                            "sgst_percentage": None,
+                            "igst_percentage": None,
+                            "cgst_amount": None,
+                            "sgst_amount": None,
+                            "igst_amount": None,
+                            "gst_percentage": {"raw": str(gst_val), "normalized": gst_val, "confidence": 0.9},
+                            "gst_amount": {"raw": str(gst_amount_val), "normalized": gst_amount_val, "confidence": 0.9}
+                        }
+                    }
+                    items.append(item)
+                    line_num += 1
+                    continue
+                except Exception as e:
+                    logger.debug(f"Failed parsing item row with LINE_PATTERN_SNO_MFG_DESC_PACK_HSN: {e}")
+                    continue
+
+        if not items:
+            desc_qty_rate_amt_pattern = re.compile(
+                r"(?:^|\n)(?P<desc>[^\n\r]+?)\s*\n\s*"
+                r"(?P<qty>\d+(?:\.\d+)?)\s*\n\s*"
+                r"(?P<rate>\d+\.\d{2})\s*\n\s*"
+                r"(?P<amt>\d+\.\d{2})",
+                re.MULTILINE
+            )
+            for m in desc_qty_rate_amt_pattern.finditer(ocr_text):
+                desc_val = m.group("desc").strip()
+                if any(kw in desc_val.upper() for kw in ["ITEM DESCRIPTION", "PARTICULARS", "DESCRIPTION", "SUBTOTAL", "TOTAL", "BILLED TO", "SHIP TO"]):
+                    continue
+                try:
+                    qty_v = float(m.group("qty"))
+                    rate_v = float(m.group("rate"))
+                    amt_v = float(m.group("amt"))
+                except ValueError:
+                    continue
+                if abs(round(qty_v * rate_v, 2) - amt_v) < 1.0:
+                    items.append({
+                        "line_number": line_num,
+                        "product": {
+                            "product_code": None,
+                            "description": {"raw": desc_val, "normalized": desc_val, "confidence": 0.85},
+                            "hsn_code": None
+                        },
+                        "batch": {
+                            "batch_no": {"raw": "", "normalized": "", "confidence": 0.0},
+                            "expiry_date": {"raw": "", "normalized": "", "confidence": 0.0}
+                        },
+                        "packaging": {
+                            "pack_size": "1 Unit",
+                            "unit_count": 1,
+                            "unit_type": "Units"
+                        },
+                        "quantity": {
+                            "qty": {"raw": str(qty_v), "normalized": qty_v, "confidence": 0.85},
+                            "free_qty": None,
+                            "total_qty": qty_v
+                        },
+                        "pricing": {
+                            "mrp": {"raw": str(rate_v), "normalized": rate_v, "confidence": 0.85},
+                            "purchase_rate": {"raw": str(rate_v), "normalized": rate_v, "confidence": 0.85},
+                            "discount_percentage": None,
+                            "discount_amount": None,
+                            "taxable_amount": {"raw": str(amt_v), "normalized": amt_v, "confidence": 0.85}
+                        },
+                        "tax": {
+                            "cgst_percentage": None,
+                            "sgst_percentage": None,
+                            "igst_percentage": None,
+                            "cgst_amount": None,
+                            "sgst_amount": None,
+                            "igst_amount": None,
+                            "gst_percentage": {"raw": "0", "normalized": 0.0, "confidence": 0.0},
+                            "gst_amount": {"raw": "0.00", "normalized": 0.0, "confidence": 0.0}
+                        }
+                    })
+                    line_num += 1
+
         return items
 
     @classmethod

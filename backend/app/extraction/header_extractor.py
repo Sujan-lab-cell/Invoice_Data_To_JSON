@@ -141,6 +141,11 @@ class HeaderExtractor:
         "SURGICALS & PHARMACEUTICALS", "WHOLESALE DRUGGISTS"
     ]
 
+    # Buyer label patterns
+    BUYER_LABEL_PATTERNS = [
+        r"(?:billed\s*to|bill\s*to|buyer\s*name|buyer|customer\s*name|customer|consignee|receiver(?:\s*details)?|party\s*name)\s*[:\-]?\s*(.*)",
+    ]
+
     # Address label patterns
     ADDRESS_LABEL_PATTERNS = [
         r"(?:regd\.?\s*|registered\s*|head\s*|corp(?:orate)?\s*|office\s*|branch\s*)?address\s*[:\-]\s*(.*)",
@@ -203,6 +208,18 @@ class HeaderExtractor:
             elif len(parts) == 2 and parts[0] == parts[1]:
                 cleaned = parts[0]
 
+        return cleaned
+
+    @classmethod
+    def clean_buyer_name(cls, candidate: str, supplier_raw: str = "") -> str:
+        """
+        Cleans candidate buyer name strings.
+        """
+        if not candidate:
+            return ""
+        cleaned = cls.clean_name(candidate)
+        if supplier_raw and supplier_raw.upper() in cleaned.upper():
+            return ""
         return cleaned
 
     @classmethod
@@ -535,14 +552,20 @@ class HeaderExtractor:
         if not gstins:
             return supplier_gstin, buyer_gstin
 
-        # Single GSTIN: Most likely Supplier, unless the surrounding line indicates Buyer details
+        # Single GSTIN: Most likely Supplier, unless the surrounding/preceding lines indicate Buyer details
         if len(gstins) == 1:
             gstin = gstins[0]
             found_buyer_keyword = False
-            for line in lines:
-                if gstin in line.upper() and any(kw in line.upper() for kw in ["BUYER", "TO", "CUSTOMER", "RECEIVER", "SHIP TO"]):
-                    found_buyer_keyword = True
+            gstin_idx = -1
+            for idx, line in enumerate(lines):
+                if gstin in line.upper():
+                    gstin_idx = idx
                     break
+            if gstin_idx != -1:
+                preceding = lines[max(0, gstin_idx - 4): gstin_idx + 1]
+                if any(any(kw in l.upper() for kw in ["BILLED TO", "BILL TO", "BUYER", "CUSTOMER", "RECEIVER", "SHIP TO", "CONSIGNEE"]) for l in preceding):
+                    found_buyer_keyword = True
+
             if found_buyer_keyword:
                 buyer_gstin = {"raw": gstin, "confidence": 0.9}
             else:
@@ -609,7 +632,7 @@ class HeaderExtractor:
 
     # Buyer label patterns
     BUYER_LABEL_PATTERNS = [
-        r"\b(?:BUYER(?:\s*NAME)?|BILLED\s*TO|BILL\s*TO|CUSTOMER(?:\s*NAME)?|PARTY(?:\s*NAME)?|CONSIGNEE|RECEIVER(?:\s*DETAILS)?|MESSRS\.?|M/S\.?)\s*[:\-]\s*([A-Za-z0-9&.,()\- ]+)",
+        r"\b(?:BUYER(?:\s*NAME)?|BILLED\s*TO|BILL\s*TO|CUSTOMER(?:\s*NAME)?|PARTY(?:\s*NAME)?|CONSIGNEE|RECEIVER(?:\s*DETAILS)?|MESSRS\.?|M/S\.?)\s*[:\-]?(?:\s+([A-Za-z0-9&.,()\- ]+))?",
     ]
 
     @classmethod
@@ -712,12 +735,14 @@ class HeaderExtractor:
 
         # 2. Buyer Extraction:
         # Step 2a: Check explicit Buyer labels (e.g. "BUYER: ...", "BILLED TO: ...", "Customer: ...")
-        for line in lines:
+        for idx, line in enumerate(lines):
             line_clean = line.strip()
             for pat in cls.BUYER_LABEL_PATTERNS:
                 match = re.search(pat, line_clean, re.IGNORECASE)
                 if match:
-                    candidate = match.group(1).strip()
+                    candidate = match.group(1).strip() if match.group(1) else ""
+                    if not candidate and idx + 1 < len(lines):
+                        candidate = lines[idx + 1].strip()
                     clean_buyer = cls.clean_buyer_name(candidate, supplier_raw)
                     if clean_buyer and len(re.sub(r"[^A-Za-z]", "", clean_buyer)) >= 3:
                         if not supplier_norm or supplier_norm[:6] not in clean_buyer.upper():

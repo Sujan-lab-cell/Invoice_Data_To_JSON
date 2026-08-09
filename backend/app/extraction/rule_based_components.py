@@ -91,51 +91,47 @@ class TotalsCalculator:
         subtotal = {"raw": "", "normalized": 0.0, "confidence": 0.0}
         tax_total = {"raw": "", "normalized": 0.0, "confidence": 0.0}
         grand_total = {"raw": "", "normalized": 0.0, "confidence": 0.0}
-
-        # 1. Grand Total (final invoice amount)
-        gt_match = re.search(r"grand\s+total\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
-        if not gt_match:
-            gt_match = re.search(r"total\s*[:\-]\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
-        if gt_match:
-            val = gt_match.group(1).replace(",", "")
-            grand_total = {"raw": val, "normalized": float(val), "confidence": 0.8}
-
-        # 2. Subtotal (Gross Amount / Taxable Amount)
-        sub_match = re.search(r"gross\s+amt\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
-        if not sub_match:
-            sub_match = re.search(r"sale\s+value\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
-        if not sub_match:
-            sub_match = re.search(r"(?:sub\s*)?total\s*(?:before\s+tax)\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
-        if sub_match:
-            val = sub_match.group(1).replace(",", "")
-            subtotal = {"raw": val, "normalized": float(val), "confidence": 0.8}
-
-        # 3. GST Amount (tax total)
-        tax_match = re.search(r"gst\s+amt\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
-        if not tax_match:
-            tax_match = re.search(r"total\s+gst\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
-        if tax_match:
-            val = tax_match.group(1).replace(",", "")
-            tax_total = {"raw": val, "normalized": float(val), "confidence": 0.8}
-
-        # 4. Discount Amount
         discount_val = {"raw": "", "normalized": 0.0, "confidence": 0.0}
-        disc_match = re.search(r"dis(?:count)?\s*amt\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
-        if not disc_match:
-            disc_match = re.search(r"cash\s+disc\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
-        if disc_match:
-            val = disc_match.group(1).replace(",", "")
-            discount_val = {"raw": val, "normalized": float(val), "confidence": 0.8}
-
-        # 5. Round Off
         round_off_val = {"raw": "", "normalized": 0.0, "confidence": 0.0}
-        ro_match = re.search(r"r\.off\s*([+\-]?\s*[0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
-        if not ro_match:
-            ro_match = re.search(r"round\s*off\s*([+\-]?\s*[0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
+
+        # 1. Grand Total (Net Payable / Net Amount / Grand Total / Invoice Total / Total :)
+        gt_match = re.search(r"(?:net\s+(?:payable|amount)|grand\s+total|invoice\s+total)\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
+        if not gt_match:
+            gt_match = re.search(r"(?<!sub\s)(?<!taxable\s)(?<!gst\s)(?<!items\s)(?<!qty\s)(?<!bills\s)(?<!outstanding\s)\btotal\s*[:\-]\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
+        if gt_match:
+            raw_val = gt_match.group(1)
+            val = raw_val.replace(",", "")
+            grand_total = {"raw": raw_val, "normalized": float(val), "confidence": 0.85}
+
+        # 2. Subtotal (Taxable Amount / Taxable Value / Gross Amount / Gross Amt / Sale Value / Sub Total / Subtotal)
+        sub_match = re.search(r"(?:taxable\s+(?:amount|value)|gross\s+amt(?:ount)?|sale\s+value|sub\s*total|subtotal)\s*(?:before\s+tax)?\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
+        if sub_match:
+            raw_val = sub_match.group(1)
+            val = raw_val.replace(",", "")
+            subtotal = {"raw": raw_val, "normalized": float(val), "confidence": 0.85}
+
+        # 3. Tax Total (Tax Amount / GST Amount / GST Amt / Total GST / GST (xx%) / Tax Tot)
+        tax_match = re.search(r"(?:tax\s+amount|gst\s+amt(?:ount)?|total\s+gst|gst\s*(?:\([^\)]+\))?)\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
+        if not tax_match:
+            tax_match = re.search(r"tax\s+tot\s*[:;\-]?\s*(?:[0-9,]+\.[0-9]{2}\s+){2}([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
+        if tax_match:
+            raw_val = tax_match.group(1)
+            val = raw_val.replace(",", "")
+            tax_total = {"raw": raw_val, "normalized": float(val), "confidence": 0.85}
+
+        # 4. Discount Amount (Discount Amount / Dis Amt / Cash Disc / Local Bill Disc)
+        disc_match = re.search(r"(?:dis(?:count)?\s*amt(?:ount)?|cash\s+disc(?:ount)?|local\s+bill\s+disc(?:ount)?)\s*[:\-]?\s*([0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
+        if disc_match:
+            raw_val = disc_match.group(1)
+            val = raw_val.replace(",", "")
+            discount_val = {"raw": raw_val, "normalized": float(val), "confidence": 0.85}
+
+        # 5. Round Off (Write Off / Round Off / R.Off)
+        ro_match = re.search(r"(?:write\s*off|round\s*off|r\.off)\s*[:\-]?\s*([+\-]?\s*[0-9,]+\.[0-9]{2})", ocr_text, re.IGNORECASE)
         if ro_match:
             raw_str = ro_match.group(1).strip()
             val = raw_str.replace(" ", "").replace(",", "")
-            round_off_val = {"raw": raw_str, "normalized": float(val), "confidence": 0.8}
+            round_off_val = {"raw": raw_str, "normalized": float(val), "confidence": 0.85}
 
         return {
             "subtotal": subtotal,
