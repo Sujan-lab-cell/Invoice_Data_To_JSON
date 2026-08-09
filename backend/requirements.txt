@@ -10,7 +10,7 @@ torchvision>=0.15.0
 
 
 # Image & Document Processing
-opencv-python>=4.8.0
+opencv-python-headless>=4.8.0
 pillow>=10.0.0
 pdfplumber>=0.10.0
 pypdf>=4.0.0
