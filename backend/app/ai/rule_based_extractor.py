@@ -31,9 +31,9 @@ class RuleBasedInvoiceExtractor:
         # Run header extraction rules using cleaned text
         extracted_data = HeaderExtractor.extract(cleaned_text)
         
-        # Run item extraction rules using cleaned text
+        # Run item extraction rules using cleaned text and ocr_result
         from app.extraction.item_extractor import ItemExtractor
-        extracted_data["items"] = ItemExtractor.extract_items(cleaned_text)
+        extracted_data["items"] = ItemExtractor.extract_items(cleaned_text, ocr_result=ocr_result)
         
         # Load and validate using Pydantic model
         return Invoice.model_validate(extracted_data)

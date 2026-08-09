@@ -129,6 +129,19 @@ def validate_invoice(invoice: Invoice) -> Validation:
             )
 
     # Validation is considered invalid only if there is a severe 'error' severity issue
-    is_valid = not any(issue.severity == "error" for issue in issues)
+    error_count = sum(1 for issue in issues if issue.severity == "error")
+    warning_count = sum(1 for issue in issues if issue.severity == "warning")
+    has_errors = error_count > 0
+    has_warnings = warning_count > 0
+    is_valid = not has_errors
+    confidence_score = max(0.0, min(1.0, 1.0 - (error_count * 0.2 + warning_count * 0.05)))
 
-    return Validation(is_valid=is_valid, issues=issues)
+    return Validation(
+        is_valid=is_valid,
+        has_errors=has_errors,
+        has_warnings=has_warnings,
+        error_count=error_count,
+        warning_count=warning_count,
+        confidence_score=confidence_score,
+        issues=issues
+    )

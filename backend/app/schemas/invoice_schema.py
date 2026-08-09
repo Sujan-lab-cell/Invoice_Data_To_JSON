@@ -42,6 +42,7 @@ class Buyer(BaseModel):
     name: ValuePair = Field(..., description="Buyer pharmacy name.")
     gstin: Optional[ValuePair] = Field(None, description="Buyer GST Identification Number.")
     address: Optional[ValuePair] = Field(None, description="Buyer delivery address.")
+    phone: Optional[ValuePair] = Field(None, description="Buyer contact number.")
     state: Optional[ValuePair] = Field(None, description="Buyer state.")
 
 
@@ -187,21 +188,28 @@ class ValidationIssue(BaseModel):
 
 class Validation(BaseModel):
     """
-    Validation results of mathematical and logical checks.
+    Validation results of mathematical and logical checks conforming to mentor format.
     """
     is_valid: bool = Field(True, description="True if no severe 'error' issues are present.")
+    has_errors: bool = Field(False, description="True if error count > 0.")
+    has_warnings: bool = Field(False, description="True if warning count > 0.")
+    error_count: int = Field(0, description="Total count of error severity issues.")
+    warning_count: int = Field(0, description="Total count of warning severity issues.")
+    confidence_score: float = Field(1.0, description="Overall validation confidence score.")
     issues: List[ValidationIssue] = Field(default_factory=list, description="Mathematical validation errors/warnings.")
 
 
 class Review(BaseModel):
     """
-    Human-in-the-loop review audit trail.
+    Human-in-the-loop review audit trail conforming to mentor format.
     """
-    requires_review: bool = Field(True, description="Flags if manual review is needed (defaults to True).")
-    reason: Optional[str] = Field(None, description="Reason triggering review request (e.g. 'Fuzzy item mapping').")
+    requires_review: bool = Field(True, description="Flags if manual review is needed.")
+    reason: Optional[str] = Field(None, description="Primary reason triggering review request.")
+    review_reasons: List[str] = Field(default_factory=list, description="Detailed list of reasons requiring review.")
     reviewed_by: Optional[str] = Field(None, description="User identifier of reviewer.")
     reviewed_at: Optional[str] = Field(None, description="ISO Timestamp of review completion.")
-    is_approved: bool = Field(False, description="Flag indicating if review approved entry to ERP (never auto-saved).")
+    is_approved: bool = Field(False, description="Flag indicating if review approved entry to ERP.")
+    approval_notes: Optional[str] = Field(None, description="Optional notes from reviewer.")
 
 
 class RawExtraction(BaseModel):
@@ -240,3 +248,12 @@ class Document(BaseModel):
     raw_extraction: Optional[RawExtraction] = Field(None, description="Intermediate extraction audit payloads.")
     validation: Validation = Field(default_factory=Validation, description="Auto-calculation validation checks.")
     review: Review = Field(default_factory=Review, description="Human review status block.")
+
+    def to_canonical_dict(self) -> Dict[str, Any]:
+        """
+        Maps extracted fields into the canonical 10 top-level sections:
+        document, invoice, supplier, buyer, items, totals, tax_summary,
+        validation, review, raw_extraction.
+        """
+        from app.schemas.canonical_schema import CanonicalNormalizer
+        return CanonicalNormalizer.normalize(self).model_dump()
